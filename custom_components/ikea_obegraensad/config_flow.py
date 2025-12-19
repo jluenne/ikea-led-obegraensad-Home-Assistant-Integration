@@ -40,9 +40,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Test connection
             try:
                 await self._test_connection(host)
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
-                errors["base"] = e
+                # Use a serializable error code for the UI
+                errors["base"] = "cannot_connect"
             else:
                 # Check if already configured
                 await self.async_set_unique_id(host)
