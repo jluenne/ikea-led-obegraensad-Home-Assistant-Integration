@@ -61,46 +61,48 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _test_connection(self, host: str) -> bool:
         """Test if we can connect to the device."""
+        import aiohttp
+        import async_timeout
+
         try:
-            # Import the coordinator to test connection
-            from .coordinator import IkeaLedCoordinator
-            
-            # Create a temporary coordinator for testing
-            test_coordinator = IkeaLedCoordinator(self.hass, host)
-            
-            # Give it time to establish WebSocket connection
-            await asyncio.sleep(3)
-            
-            # Try to get initial data
-            await test_coordinator.async_config_entry_first_refresh()
-            
-            # Check if we got valid data
-            if not test_coordinator.data or not isinstance(test_coordinator.data, dict):
-                _LOGGER.warning("Device at %s returned invalid data: %s", host, test_coordinator.data)
+            url = f"http://{host}/api/info"
+
+            async with aiohttp.ClientSession() as session:
+                async with async_timeout.timeout(5):
+                    async with session.get(url) as response:
+                        if response.status != 200:
+                            _LOGGER.warning(
+                                "Device at %s returned HTTP %s",
+                                host,
+                                response.status,
+                            )
+                            raise CannotConnect
+
+                        data = await response.json()
+
+            if not isinstance(data, dict):
+                _LOGGER.warning(
+                    "Device at %s returned invalid JSON: %s",
+                    host,
+                    data,
+                )
                 raise CannotConnect
-            
+
             # Verify we have expected fields in the response
-            required_fields = ["brightness"]  # Minimum required field
-            if not any(field in test_coordinator.data for field in required_fields):
-                _LOGGER.warning("Device at %s returned unexpected data format: %s", host, test_coordinator.data)
+            if "brightness" not in data:
+                _LOGGER.warning(
+                    "Device at %s returned unexpected data format: %s",
+                    host,
+                    data,
+                )
                 raise CannotConnect
-                
+
             _LOGGER.info("Successfully connected to IKEA LED device at %s", host)
-            
-            # Clean up test coordinator
-            await test_coordinator.async_shutdown()
-            
             return True
-            
-        except ConnectionError as ex:
-            _LOGGER.error("Network connection failed for device at %s: %s", host, ex)
-            raise CannotConnect from ex
-        except TimeoutError as ex:
-            _LOGGER.error("Connection timeout for device at %s: %s", host, ex)
-            raise CannotConnect from ex
-        except Exception as ex:
-            _LOGGER.exception("Error connecting to IKEA LED device at %s", host)
-            raise CannotConnect from ex
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            _LOGGER.error("Error connecting to IKEA LED device at %s: %s", host, err)
+            raise CannotConnect from err
 
 
 class CannotConnect(HomeAssistantError):
